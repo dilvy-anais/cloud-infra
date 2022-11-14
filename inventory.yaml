@@ -1,0 +1,14 @@
+all:
+  children:
+    webservers:
+      hosts:
+        192.168.122.17
+    dbservers:
+      hosts:
+        192.168.122.234
+    devenv:
+      hosts:
+        192.168.122.146
+
+  vars:
+    ansible_user: root

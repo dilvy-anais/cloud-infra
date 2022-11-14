@@ -1,0 +1,169 @@
+---
+# ALL
+
+- name: Update all 
+  hosts: all
+  become: true
+  tasks:
+  - name: Updating all apt package
+    apt: update_cache=yes force_apt_get=yes cache_valid_time=3600
+
+#  - name: Upgrading  all apt package
+#    apt: upgrade=dist force_apt_get=yes
+
+#  - name: Check if reboot is required
+#    register: reboot_required_file
+#    stat: path=/var/run/reboot-required get_md5=no
+
+#  - name: Reboot the box if kernel updated
+#    reboot:
+#      msg: "Reboot initiated by Ansible for kernel updates"
+#      connect_timeout: 5
+#      reboot_timeout: 300
+#      pre_reboot_delay: 0
+#      post_reboot_delay: 30
+#      test_command: uptime
+#    when: reboot_required_file.stat.exists
+
+# WEB SERVER
+- name: Instantiate  web server 
+  hosts: webservers
+  become: true
+  vars_files: vars/main.yml
+
+  tasks:
+  - name: Installing Apache2 and PHP7.4 
+    apt:
+      name: ["apache2","php7.4","php-mysql"]
+      state: present
+      update_cache: yes
+
+  - name: Changing the rights of http folder
+    file:
+      path: /var/www/html
+      state: directory
+      mode: '0755'
+
+  - name: Removing default index.html
+    file:
+      path: /var/www/html/index.html
+      state: absent
+
+  - name: Uploading web app source
+    copy:
+      src: app/
+      dest: /var/www/html/
+
+  - name: Deploying PHP database config
+    template:
+      src: "db-config.php.j2"
+      dest: "/var/www/html/db-config.php"
+  
+  - name: Ensuring apache service is start
+    service:
+      name: apache2
+      state: started
+      enabled: yes
+
+
+# DATABASE SERVER
+- name: Instantiate database server
+  hosts: dbservers
+  become: true
+  vars_files: vars/main.yml
+  vars:
+    root_password: "my_secret_password"
+
+  tasks:
+  - name: Configure dpkg
+    ansible.builtin.command: dpkg --configure -a
+    
+  - name: Installing mysql
+    apt:
+      name: ["mysql-server","python3-mysqldb"]
+      state: present
+      update_cache: yes  
+
+  - name: Creating MySQL configuration
+    copy:
+      dest: "/root/.my.cnf"
+      content: |
+        [client]
+        user=root
+        password={{ root_password }}
+      mode: 0400
+
+  - name: Allowing external MySQL connections
+    lineinfile:
+      path: /etc/mysql/mysql.conf.d/mysqld.cnf
+      regexp: "{{item.regexp}}"
+      line: "{{item.line}}"
+    loop:
+      - { regexp: '^skip-external-locking', line: '# skip-external-locking' }
+      - { regexp: '^bind-address', line: '# bind-address' }
+    notify: Restart mysql
+
+  - name: Uploading sql table config
+    template:
+      src: "table.sql.j2"
+      dest: "/tmp/table.sql"
+
+  - name: Adding sql table to database
+    mysql_db:
+      name: "{{ mysql_dbname }}"
+      state: present
+      login_user: root
+      login_password: '{{ root_password }}'
+      state: import 
+      target: /tmp/table.sql
+
+  - name: "Create {{ mysql_user }} with all {{ mysql_dbname }} privileges"
+    mysql_user:
+      name: "{{ mysql_user }}"
+      password: "{{ mysql_password }}"
+      priv: "{{ mysql_dbname }}.*:ALL"
+      host: "{{ webserver_host }}"
+      state: present
+      login_user: root
+      login_password: '{{ root_password }}'
+      login_unix_socket: /var/run/mysqld/mysqld.sock
+
+  handlers:
+    - name: Restart mysql
+      service:
+        name: mysql
+        state: restarted
+
+#Development Environment 
+- name: Create development environment
+  hosts: devenv
+  roles:
+    - role: gantsign.visual-studio-code
+      users:
+        - username: nbiotech
+          visual_studio_code_extensions:
+            - xdebug.php-debug
+            - bmewburn.vscode-intelephense-client
+            - zobo.php-intellisense
+            - GitLab.gitlab-workflow
+          visual_studio_code_settings_overwrite: no
+          visual_studio_code_keybindings_overwrite: no
+  tasks:
+    - name: Install git
+      apt:
+        name: git
+        state: present
+        update_cache: yes
+
+    - name: Install PHP7.4
+      apt:
+        name: php7.4
+        state: present
+        update_cache: yes
+      
+ 
+ 
+      
+
+
+
